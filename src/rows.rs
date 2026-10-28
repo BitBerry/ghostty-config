@@ -344,7 +344,16 @@ impl Editor {
             self.themes.iter().filter(|n| n.to_lowercase().contains(&q)).take(12).map(|n| (n.clone(), n.clone())).collect()
         };
         let matches = if q.is_empty() { 0 } else { self.themes.iter().filter(|n| n.to_lowercase().contains(&q)).count() };
-        let overridden = self.value("palette").flag() == Some(true) && !self.loaded.palette.is_empty();
+        let mut overrides: Vec<String> = Vec::new();
+        for (k, name) in [("background", "背景色"), ("foreground", "文字颜色"), ("cursor-color", "光标颜色")] {
+            if self.value(k).color().is_some() {
+                overrides.push(name.into());
+            }
+        }
+        if self.value("palette").flag() == Some(true) && !self.loaded.palette.is_empty() {
+            overrides.push(format!("{} 条 palette", self.loaded.palette.len()));
+        }
+        let overridden = !overrides.is_empty();
         let tile_w = ((width - 3. * 12.) / 4.).max(80.);
         let mut grid = div().flex().flex_wrap().gap_x(px(12.)).gap_y(px(14.)).mt(px(6.));
         for (i, (val, name)) in tiles.into_iter().enumerate() {
@@ -426,8 +435,8 @@ impl Editor {
             })
             .when(overridden, |d| {
                 d.child(div().max_w(px(MEASURE)).text_size(px(13.)).text_color(p.s(700)).child(format!(
-                    "配置里的 {} 条 palette 覆盖仍然生效，换主题时这些颜色不会变；可在下方「调色板覆盖」里删除。",
-                    self.loaded.palette.len()
+                    "配置里单独写了{}，会盖过主题的颜色，换主题时这些颜色不会变。要让主题完全生效，在下面对应项点「恢复默认」。",
+                    overrides.join("、")
                 )))
             })
     }

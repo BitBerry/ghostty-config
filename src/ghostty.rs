@@ -50,14 +50,29 @@ fn which(name: &str) -> Option<PathBuf> {
     std::env::var_os("PATH")?.to_str()?.split(':').map(|d| Path::new(d).join(name)).find(|p| p.is_file())
 }
 
-/// The config file Ghostty reads: on macOS the Application Support location
-/// comes first, then XDG; `config.ghostty` is the 1.2+ name, `config` the
-/// older one. With none present, a new file goes to the XDG location.
-pub fn config_path() -> PathBuf {
+/// The config files Ghostty loads, in order: XDG first, then (macOS) the
+/// Application Support location, whose settings win. `config.ghostty` is the
+/// 1.2+ name, `config` the older one. Ghostty reads every one that exists.
+pub fn config_files() -> Vec<PathBuf> {
     let support = home().join("Library/Application Support").join(BUNDLE_ID);
     let xdg = xdg_config().join("ghostty");
-    let candidates = [support.join("config.ghostty"), support.join("config"), xdg.join("config.ghostty"), xdg.join("config")];
-    candidates.iter().find(|p| p.is_file()).cloned().unwrap_or_else(|| xdg.join("config.ghostty"))
+    [xdg.join("config"), xdg.join("config.ghostty"), support.join("config"), support.join("config.ghostty")]
+        .into_iter()
+        .filter(|p| p.is_file())
+        .collect()
+}
+
+/// Settings lines in a config file.
+pub fn settings_count(p: &Path) -> usize {
+    std::fs::read_to_string(p).map(|t| crate::config::parse(&t).iter().filter(|l| l.key.is_some()).count()).unwrap_or(0)
+}
+
+/// The file to edit: the one holding the settings (an empty file Ghostty
+/// also reads is not it). With none present, a new file goes to the XDG
+/// location.
+pub fn config_path() -> PathBuf {
+    let files = config_files();
+    files.iter().max_by_key(|p| settings_count(p)).cloned().unwrap_or_else(|| xdg_config().join("ghostty/config.ghostty"))
 }
 
 /// `~/.config/ghostty/config` for display.

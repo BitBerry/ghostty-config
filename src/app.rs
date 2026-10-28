@@ -57,6 +57,8 @@ pub struct Editor {
     pub theme_cache: ThemeCache,
     /// Monospaced families Ghostty can find; `None` until known.
     pub fonts: Option<HashSet<String>>,
+    /// Other config files Ghostty loads that hold settings.
+    pub other_files: Vec<String>,
     /// The running Ghostty can be told to reload with SIGUSR2.
     reload_signal: bool,
     /// The previous file was backed up this session.
@@ -144,6 +146,7 @@ impl Editor {
             themes,
             theme_cache: ThemeCache::default(),
             fonts: None,
+            other_files: Vec::new(),
             reload_signal: false,
             backed_up: false,
             backdrops: Backdrops::default(),
@@ -162,6 +165,11 @@ impl Editor {
             _subs: subs,
         };
         this.split = this.cat == "split";
+        this.other_files = ghostty::config_files()
+            .into_iter()
+            .filter(|f| *f != this.path && ghostty::settings_count(f) > 0)
+            .map(|f| ghostty::tilde(&f))
+            .collect();
         this.load(disk_text);
         window.focus(&this.focus_handle, cx);
 
@@ -498,7 +506,12 @@ impl Editor {
                         None => "没有找到 Ghostty.app".into(),
                     })
                     .child(div().font_family(MONO).text_size(px(11.)).child(ghostty::tilde(&self.path)))
-                    .when(!self.path.exists(), |d| d.child("文件尚不存在，保存时创建")),
+                    .when(!self.path.exists(), |d| d.child("文件尚不存在，保存时创建"))
+                    .children(
+                        self.other_files
+                            .iter()
+                            .map(|f| div().mt(px(6.)).text_color(p.s(700)).child(format!("Ghostty 也会读取 {f}，其中的设置会覆盖这里"))),
+                    ),
             )
     }
 
