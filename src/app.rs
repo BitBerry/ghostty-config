@@ -47,6 +47,8 @@ pub struct Editor {
     pub cat: &'static str,
     pub search: Entity<InputState>,
     pub theme_search: Entity<InputState>,
+    /// The theme group shown: dark or light; `None` follows the current theme.
+    pub theme_dark: Option<bool>,
     /// The option under the pointer.
     pub focus: Option<&'static str>,
     pub split: bool,
@@ -138,6 +140,7 @@ impl Editor {
             cat: std::env::var("GHOSTTY_CONFIG_CAT").ok().and_then(|c| cat_id(&c)).unwrap_or("theme"),
             search,
             theme_search,
+            theme_dark: None,
             focus: None,
             split: false,
             blink_on: true,

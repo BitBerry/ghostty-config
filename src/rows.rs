@@ -12,16 +12,39 @@ use crate::kit::{Btn, SegItem, Tag, button, radio_dot, seg, tag};
 use crate::schema::{self, Kind, Num, OPTS, Opt, Val};
 use crate::theme::{MONO, Pal, PalExt as _, RADIUS_LG, RADIUS_MD, rgbc};
 
-/// The design's eight: (value, name).
-const FEATURED: &[(&str, &str)] = &[
-    ("", "Ghostty 默认"),
-    ("TokyoNight", "TokyoNight"),
-    ("Catppuccin Mocha", "Catppuccin Mocha"),
-    ("Gruvbox Dark", "Gruvbox Dark"),
-    ("Dracula", "Dracula"),
-    ("Nord", "Nord"),
-    ("Catppuccin Latte", "Catppuccin Latte"),
-    ("Rose Pine Dawn", "Rose Pine Dawn"),
+/// The curated themes: (value, name, mood). Each one a well-loved palette
+/// with its own character, spread across cool, warm, muted and vivid.
+const DARK: &[(&str, &str, &str)] = &[
+    ("", "Ghostty 默认", "中性灰底，不挑场合"),
+    ("TokyoNight", "TokyoNight", "东京夜色，冷蓝霓虹"),
+    ("Catppuccin Mocha", "Catppuccin Mocha", "奶油粉彩，柔和"),
+    ("Rose Pine", "Rose Pine", "暮色玫瑰，雅致"),
+    ("Kanagawa Wave", "Kanagawa Wave", "浮世绘靛蓝，沉静"),
+    ("Gruvbox Dark", "Gruvbox Dark", "复古暖调，旧纸木头"),
+    ("Everforest Dark Med", "Everforest Dark", "森林绿意，舒缓"),
+    ("Nord", "Nord", "北欧冰川，克制"),
+    ("Dracula", "Dracula", "紫夜高对比，鲜明"),
+    ("Nightfox", "Nightfox", "深海蓝调，层次清楚"),
+    ("Ayu Mirage", "Ayu Mirage", "雾蓝配橙黄，温和"),
+    ("Atom One Dark", "One Dark", "编辑器经典，均衡"),
+    ("Monokai Pro", "Monokai Pro", "炭黑配亮彩，活泼"),
+    ("GitHub Dark Default", "GitHub Dark", "GitHub 夜间"),
+    ("Poimandres", "Poimandres", "极简冷青，近单色"),
+    ("Vesper", "Vesper", "纯黑配桃橙，安静"),
+];
+const LIGHT: &[(&str, &str, &str)] = &[
+    ("Catppuccin Latte", "Catppuccin Latte", "拿铁奶白，粉彩"),
+    ("Rose Pine Dawn", "Rose Pine Dawn", "晨光米色，温柔"),
+    ("TokyoNight Day", "TokyoNight Day", "白昼冷蓝，清爽"),
+    ("Kanagawa Lotus", "Kanagawa Lotus", "宣纸暖白，墨色"),
+    ("Gruvbox Light", "Gruvbox Light", "复古羊皮纸"),
+    ("Everforest Light Med", "Everforest Light", "浅绿纸面，久看不累"),
+    ("Dayfox", "Dayfox", "米白配深蓝，耐看"),
+    ("Ayu Light", "Ayu Light", "明亮白底，轻快"),
+    ("Atom One Light", "One Light", "编辑器经典浅色"),
+    ("GitHub Light Default", "GitHub Light", "GitHub 日间"),
+    ("iTerm2 Solarized Light", "Solarized Light", "校准过的米黄"),
+    ("Flexoki Light", "Flexoki Light", "墨与纸，印刷质感"),
 ];
 
 pub const FONTS: &[&str] = &["JetBrains Mono", "Fira Code", "IBM Plex Mono", "Source Code Pro", "Menlo"];
@@ -332,16 +355,22 @@ impl Editor {
         let cur = v.text().to_string();
         let picked = ghostty::pick_theme(&cur, self.dark);
         let pair = picked != cur;
-        let tiles: Vec<(String, String)> = if q.is_empty() {
-            let mut t: Vec<(String, String)> = FEATURED.iter().map(|(v, n)| (v.to_string(), n.to_string())).collect();
-            if !FEATURED.iter().any(|(v, _)| *v == cur) {
+        // Which group to show: chosen, else the one the current theme is in.
+        let cur_dark =
+            if picked.is_empty() { true } else { self.theme_cache.get(&self.install, &picked).map(|t| t.bg.lum() < 0.5).unwrap_or(true) };
+        let dark = self.theme_dark.unwrap_or(cur_dark);
+        let group = if dark { DARK } else { LIGHT };
+        let tiles: Vec<(String, String, String)> = if q.is_empty() {
+            let mut t: Vec<(String, String, String)> =
+                group.iter().map(|(v, n, m)| (v.to_string(), n.to_string(), m.to_string())).collect();
+            let featured = DARK.iter().chain(LIGHT).any(|(v, _, _)| *v == cur);
+            if !featured && cur_dark == dark {
                 let name = if pair { format!("{picked}（随外观）") } else { cur.clone() };
-                t.insert(0, (cur.clone(), name));
-                t.truncate(8);
+                t.insert(0, (cur.clone(), name, "当前使用".into()));
             }
             t
         } else {
-            self.themes.iter().filter(|n| n.to_lowercase().contains(&q)).take(12).map(|n| (n.clone(), n.clone())).collect()
+            self.themes.iter().filter(|n| n.to_lowercase().contains(&q)).take(12).map(|n| (n.clone(), n.clone(), String::new())).collect()
         };
         let matches = if q.is_empty() { 0 } else { self.themes.iter().filter(|n| n.to_lowercase().contains(&q)).count() };
         let mut overrides: Vec<String> = Vec::new();
@@ -356,7 +385,7 @@ impl Editor {
         let overridden = !overrides.is_empty();
         let tile_w = ((width - 3. * 12.) / 4.).max(80.);
         let mut grid = div().flex().flex_wrap().gap_x(px(12.)).gap_y(px(14.)).mt(px(6.));
-        for (i, (val, name)) in tiles.into_iter().enumerate() {
+        for (i, (val, name, mood)) in tiles.into_iter().enumerate() {
             let colors = if val.is_empty() {
                 ghostty::default_colors()
             } else {
@@ -405,14 +434,47 @@ impl Editor {
                             ),
                     )
                     .child(
-                        div().text_size(px(12.)).line_height(relative(1.3)).when(on, |d| d.font_weight(FontWeight::SEMIBOLD)).child(name),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .line_height(relative(1.3))
+                                    .when(on, |d| d.font_weight(FontWeight::SEMIBOLD))
+                                    .child(name),
+                            )
+                            .when(!mood.is_empty(), |d| {
+                                d.child(
+                                    div()
+                                        .text_size(px(11.))
+                                        .line_height(relative(1.35))
+                                        .text_color(p.n(700))
+                                        .whitespace_nowrap()
+                                        .truncate()
+                                        .child(mood),
+                                )
+                            }),
                     ),
             );
         }
+        let groups = [(true, "深色", DARK.len()), (false, "浅色", LIGHT.len())]
+            .into_iter()
+            .map(|(d, label, n)| SegItem {
+                label: format!("{label} {n}").into(),
+                checked: dark == d,
+                new: false,
+                on_click: Box::new(cx.listener(move |this, _, _, cx| {
+                    this.theme_dark = Some(d);
+                    cx.notify();
+                })),
+            })
+            .collect();
         div()
             .flex()
             .flex_col()
             .gap(px(14.))
+            .when(q.is_empty(), |d| d.child(div().mt(px(4.)).flex().child(seg("theme-group", groups, true, p))))
             .child(grid)
             .child(
                 div()

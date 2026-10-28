@@ -360,7 +360,7 @@ pub const OPTS: &[Opt] = &[
         "主题",
         Kind::Theme,
         Def::Text(""),
-        "Ghostty 内置数百套主题，这里列出最常用的几套，其余可以在下方搜索。也可以写成 light:主题A,dark:主题B，随系统外观自动切换。",
+        "Ghostty 内置数百套主题，这里按深色、浅色各挑了一组耐看的，其余可以在下方搜索。也可以写成 light:主题A,dark:主题B，随系统外观自动切换。",
     ),
     o("background", "theme", "背景色", Kind::Color, Def::Color, "覆盖主题自带的背景色。"),
     o("foreground", "theme", "文字颜色", Kind::Color, Def::Color, "覆盖主题的默认文字颜色。"),

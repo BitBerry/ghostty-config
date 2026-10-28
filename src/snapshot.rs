@@ -47,6 +47,7 @@ fn setup(e: &mut Editor, name: &str, window: &mut Window, cx: &mut Context<Edito
     let cat = steps.next().unwrap_or("theme");
     e.snapshot_cat(cat, window, cx);
     e.hover_locked = true;
+    e.theme_dark = None;
     e.focus = None;
     for step in steps {
         match step.split_once('=') {
@@ -68,6 +69,8 @@ fn setup(e: &mut Editor, name: &str, window: &mut Window, cx: &mut Context<Edito
             _ if step == "split" => e.split = true,
             _ if step == "single" => e.split = false,
             _ if step == "save" => e.save(cx),
+            _ if step == "dark" => e.theme_dark = Some(true),
+            _ if step == "light" => e.theme_dark = Some(false),
             _ if step == "toast" => e.show_toast("已写入配置，Ghostty 已重新加载", false, cx),
             _ => eprintln!("snapshot: unknown step {step}"),
         }
