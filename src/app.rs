@@ -74,6 +74,8 @@ pub struct Editor {
     pub drag: Option<&'static str>,
     pub slider_bounds: Rc<RefCell<HashMap<&'static str, Bounds<Pixels>>>>,
     pub pickers: HashMap<&'static str, Entity<ColorPickerState>>,
+    /// Inputs of the free-text options.
+    pub texts: HashMap<&'static str, Entity<InputState>>,
     /// The color last pushed into each picker.
     pub picker_synced: HashMap<&'static str, Option<Rgb>>,
     /// The config pane follows the focused option to its line.
@@ -127,6 +129,21 @@ impl Editor {
             }));
             pickers.insert(key, picker);
         }
+        let mut texts = HashMap::new();
+        for o in OPTS.iter() {
+            let schema::Kind::Text { placeholder } = o.kind else { continue };
+            let key = o.key;
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+            subs.push(cx.subscribe(&input, move |this, input, ev: &InputEvent, cx| {
+                if matches!(ev, InputEvent::Change) {
+                    let text = input.read(cx).value().trim().to_string();
+                    if this.value(key).text() != text {
+                        this.set(key, Val::Text(text), cx);
+                    }
+                }
+            }));
+            texts.insert(key, input);
+        }
         let (disk_text, disk_mtime) = read_disk(&path);
         let mut this = Self {
             install,
@@ -160,6 +177,7 @@ impl Editor {
             drag: None,
             slider_bounds: Rc::default(),
             pickers,
+            texts,
             picker_synced: HashMap::new(),
             cfg_follow: None,
             hover_locked: false,
@@ -530,6 +548,9 @@ impl Editor {
                 "background" => Some(look.theme_bg),
                 "foreground" => Some(look.theme_fg),
                 "cursor-color" => Some(look.theme_cursor),
+                "cursor-text" => Some(look.theme_cursor_text),
+                "selection-background" => Some(look.theme_sel_bg),
+                "selection-foreground" => Some(look.theme_sel_fg),
                 "split-divider-color" => Some(look.divider_default),
                 _ => None,
             });
@@ -538,6 +559,17 @@ impl Editor {
                 if let Some(c) = shown {
                     picker.update(cx, |p, cx| p.set_value(crate::theme::rgbc(c), window, cx));
                 }
+            }
+        }
+        // Text inputs follow resets and reloads, but not while being typed in.
+        for (key, input) in self.texts.clone() {
+            let want = self.value(key).text().to_string();
+            let (now, focused) = {
+                let st = input.read(cx);
+                (st.value().trim().to_string(), st.focus_handle(cx).is_focused(window))
+            };
+            if now != want && !focused {
+                input.update(cx, |s, cx| s.set_value(want, window, cx));
             }
         }
     }

@@ -1,6 +1,6 @@
 # Ghostty 配置
 
-Ghostty 配置文件的可视化编辑器：左边挑选项，右边实时预览终端外观，下方同步显示将要写入的配置文件。用 Rust + [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) / [GPUI Kit](https://gpui-kit.com) 实现，界面按 Claude Design 里的「Ghostty 配置可视化工具」设计稿（Broadsheet 设计系统）还原。
+Ghostty 配置文件的可视化编辑器：左边挑选项，右边实时预览终端外观，下方同步显示将要写入的配置文件。用 Rust + [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) / [GPUI Kit](https://gpui-kit.com) 实现，界面按 Claude Design 里的「Ghostty 配置可视化工具」设计稿（Broadsheet 设计系统）实现；界面改动先改设计稿，再改代码。
 
 选项、默认值和取值范围按 Ghostty 1.4.0 的 `ghostty +show-config --default --docs` 核对过。
 
@@ -17,7 +17,9 @@ Ghostty 配置文件的可视化编辑器：左边挑选项，右边实时预览
 - **主题**：按深色 16 套、浅色 12 套精选常用的好看主题，每套附一句风格描述；其余 800 多套（含 `~/.config/ghostty/themes`）可搜索。
 - **实时预览**：主题配色、字体与连字、字号行高、光标形状/颜色/闪烁、标题栏样式、内边距（悬停时显示文字区域虚线框）、背景透明与模糊/玻璃效果、分屏的分隔线、拖动手柄和非焦点变暗。
 - **配置文件面板**：显示将要写入的完整文件，`~` 改动、`+` 新增、`−` 删除；悬停某项时自动滚到它在文件里的那一行。
-- **1.4 弃用写法迁移**：识别 `scrollback-limit`（已改名为 `scrollback-limit-bytes`）和 `copy-on-select = true/false`，一键改成新写法。
+- **1.4 弃用写法迁移**：识别 `scrollback-limit`（已改名为 `scrollback-limit-bytes`）、`copy-on-select = true/false` 和已移除的 `cursor-invert-fg-bg`，一键改成新写法。
+- **覆盖的选项**：主题与颜色（含窗口外观、选中颜色）、字体（含字距）、光标（形状、闪烁、颜色、光标处文字颜色、高度、粗细）、窗口（标题栏、装饰、内边距、透明与模糊、新窗口尺寸、恢复窗口、关闭确认、色彩空间）、分屏、剪贴板与鼠标、滚动历史、键盘、Shell 与目录（Shell 集成及其功能、TERM、起始目录与继承）、安全。快捷键（`keybind`）暂不提供编辑，原样保留。
+- **预览如实反映 Ghostty 的行为**：开启 Shell 集成的 cursor 功能时，提示符处的光标按 Ghostty 的做法显示为竖线，并给出说明。
 - **外部修改**：编辑期间文件被别的程序改了，会自动重新读取，未保存的改动保留在上面；保存时如果发现文件变过，也会先合并再写。
 - 控件表示不了的值（例如 `adjust-cell-height = 2` 这种像素写法、`background-blur = 12`）原样保留并注明，动了控件才替换。
 - 字体列表标出 Ghostty 内置的 JetBrains Mono，以及 `ghostty +list-fonts` 里找不到的「未安装」字体；后备字体（第二个起的 `font-family`）保持不变。

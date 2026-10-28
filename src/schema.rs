@@ -24,6 +24,7 @@ pub const CATS: &[Cat] = &[
     },
     Cat { id: "scroll", name: "滚动历史", intro: "每个终端保留多少历史输出。", visual: false },
     Cat { id: "kbd", name: "键盘", intro: "按键与鼠标指针。", visual: false },
+    Cat { id: "shell", name: "Shell 与目录", intro: "Shell 集成、TERM，以及新终端从哪个目录开始。", visual: false },
     Cat {
         id: "sec", name: "安全", intro: "终端里运行的程序——包括 SSH 远端的程序——被允许做哪些事。", visual: false
     },
@@ -157,6 +158,13 @@ pub enum Kind {
     /// The file's `palette = N=#rrggbb` lines, as one on/off: they can only
     /// be removed here.
     Palette,
+    /// A comma list of features, each on or `no-`off: (name, description).
+    /// The value is the full list in this order.
+    Flags(&'static [(&'static str, &'static str)]),
+    /// Free text, such as a path or a font name.
+    Text {
+        placeholder: &'static str,
+    },
 }
 
 pub enum Def {
@@ -205,6 +213,8 @@ impl Opt {
         match &self.kind {
             Kind::Theme | Kind::Font => Val::Text(raw.to_string()),
             Kind::Palette => Val::Bool(true),
+            Kind::Text { .. } => Val::Text(raw.to_string()),
+            Kind::Flags(flags) => Val::Text(parse_flags(flags, self.default().text(), raw)),
             Kind::Color => Rgb::parse(raw).map(|c| Val::Color(Some(c))).unwrap_or_else(raw_val),
             Kind::Num(n) => (n.de)(raw).map(Val::Num).unwrap_or_else(raw_val),
             Kind::Bool { .. } => match raw {
@@ -242,6 +252,11 @@ impl Opt {
             (Val::Color(None), _) => "跟随主题".into(),
             (Val::Color(Some(c)), _) => c.hex(),
             (Val::Bool(b), Kind::Palette) => if *b { "有覆盖" } else { "无覆盖" }.into(),
+            (Val::Text(s), Kind::Flags(_)) => {
+                let on: Vec<&str> = s.split(',').filter(|f| !f.starts_with("no-")).collect();
+                if on.is_empty() { "全部关闭".into() } else { on.join("、") }
+            }
+            (Val::Text(s), Kind::Text { placeholder }) if s.is_empty() => placeholder.to_string(),
             (Val::Bool(b), _) => if *b { "开" } else { "关" }.into(),
             (Val::Text(s), Kind::Enum(choices)) => {
                 choices.iter().find(|c| c.v == s).map(|c| c.label.to_string()).unwrap_or_else(|| s.clone())
@@ -251,6 +266,25 @@ impl Opt {
             (Val::Num(x), _) => fnum(*x),
         }
     }
+}
+
+/// `cursor,no-sudo` → every flag, on or `no-`, in the table's order. Flags
+/// not mentioned keep their default; `true` / `false` switch all.
+pub fn parse_flags(flags: &[(&str, &str)], default: &str, raw: &str) -> String {
+    let mut on: Vec<bool> = flags.iter().map(|(n, _)| default.split(',').any(|t| t == *n)).collect();
+    for tok in raw.split(',').map(str::trim) {
+        match tok {
+            "true" => on.iter_mut().for_each(|b| *b = true),
+            "false" => on.iter_mut().for_each(|b| *b = false),
+            _ => {
+                let (name, val) = tok.strip_prefix("no-").map(|n| (n, false)).unwrap_or((tok, true));
+                if let Some(i) = flags.iter().position(|(n, _)| *n == name) {
+                    on[i] = val;
+                }
+            }
+        }
+    }
+    flags.iter().zip(on).map(|((n, _), b)| if b { n.to_string() } else { format!("no-{n}") }).collect::<Vec<_>>().join(",")
 }
 
 pub fn opt(key: &str) -> Option<&'static Opt> {
@@ -311,6 +345,19 @@ fn fmt_lines(v: f64) -> String {
     if v == 0. { "不限".into() } else { format!("{} 行", grouped(v as u64)) }
 }
 
+fn fmt_cursor_h(v: f64) -> String {
+    if v == 0. { "与字同高".into() } else { fmt_rel(v) }
+}
+fn fmt_px_add(v: f64) -> String {
+    if v == 0. { "默认".into() } else { format!("+{} px", fnum(v)) }
+}
+fn fmt_cols(v: f64) -> String {
+    if v == 0. { "自动".into() } else { format!("{} 列", fnum(v)) }
+}
+fn fmt_rows(v: f64) -> String {
+    if v == 0. { "自动".into() } else { format!("{} 行", fnum(v)) }
+}
+
 fn ser_plain(v: f64) -> String {
     fnum(v)
 }
@@ -365,6 +412,28 @@ pub const OPTS: &[Opt] = &[
     o("background", "theme", "背景色", Kind::Color, Def::Color, "覆盖主题自带的背景色。"),
     o("foreground", "theme", "文字颜色", Kind::Color, Def::Color, "覆盖主题的默认文字颜色。"),
     o(
+        "window-theme",
+        "theme",
+        "窗口外观",
+        Kind::Enum(&[
+            ch("auto", "自动", "按终端背景的明暗决定标题栏、菜单等窗口元素是深色还是浅色。"),
+            ch("system", "跟随系统", "跟随 macOS 的外观设置。"),
+            ch("light", "浅色", "始终浅色。"),
+            ch("dark", "深色", "始终深色。"),
+        ]),
+        Def::Text("auto"),
+        "影响原生标题栏、标签栏和弹窗的颜色，不影响终端内容。",
+    ),
+    o(
+        "selection-background",
+        "theme",
+        "选中背景色",
+        Kind::Color,
+        Def::Color,
+        "选中文字时的底色。未设置时用主题的；主题也没有时把背景色和文字颜色对调。",
+    ),
+    o("selection-foreground", "theme", "选中文字颜色", Kind::Color, Def::Color, NO),
+    o(
         "palette",
         "theme",
         "调色板覆盖",
@@ -396,6 +465,14 @@ pub const OPTS: &[Opt] = &[
         num(-20., 60., 5., fmt_rel, ser_percent, de_percent),
         Def::Num(0.),
         "在字体自身行高的基础上增减，正数让行距更松。",
+    ),
+    o(
+        "adjust-cell-width",
+        "font",
+        "字距",
+        num(-20., 40., 5., fmt_rel, ser_percent, de_percent),
+        Def::Num(0.),
+        "在字体自身字宽的基础上增减每个字符格的宽度，正数让字符之间更松。",
     ),
     o(
         "font-feature",
@@ -443,8 +520,40 @@ pub const OPTS: &[Opt] = &[
         NO,
     ),
     o("cursor-color", "cursor", "光标颜色", Kind::Color, Def::Color, NO),
+    o(
+        "cursor-text",
+        "cursor",
+        "光标处文字颜色",
+        Kind::Color,
+        Def::Color,
+        "方块光标盖住的那个字符用什么颜色。未设置时用主题的；主题也没有时用背景色。",
+    ),
     o("cursor-opacity", "cursor", "光标不透明度", num(0.1, 1., 0.05, fmt_pct, ser_plain, de_plain), Def::Num(1.), NO),
     // — 窗口
+    o(
+        "adjust-cursor-height",
+        "cursor",
+        "光标高度",
+        num(-50., 100., 5., fmt_cursor_h, ser_percent, de_percent),
+        Def::Num(0.),
+        "在字体高度的基础上增减，不随行高变化。对竖线、方块和空心方块都有效。",
+    ),
+    o(
+        "adjust-cursor-thickness",
+        "cursor",
+        "光标粗细",
+        num(0., 12., 1., fmt_px_add, ser_plain, de_plain),
+        Def::Num(0.),
+        "竖线和空心方块光标的线宽，在默认粗细（约 1 px）上加。",
+    ),
+    o(
+        "cursor-click-to-move",
+        "cursor",
+        "⌥ 点击移动光标",
+        Kind::Bool { on: NO, off: NO },
+        Def::Bool(true),
+        "在提示符处按住 ⌥ 点击，光标移到点击的位置。需要 shell 集成。",
+    ),
     tagged(
         o(
             "macos-titlebar-style",
@@ -460,6 +569,36 @@ pub const OPTS: &[Opt] = &[
             NO,
         ),
         "新窗口生效",
+    ),
+    tagged(
+        o(
+            "window-decoration",
+            "window",
+            "窗口装饰",
+            Kind::Enum(&[ch("auto", "自动", "正常的标题栏和边框。"), ch("none", "无", "去掉标题栏和边框，标签页也一起去掉。")]),
+            Def::Text("auto"),
+            NO,
+        ),
+        "新窗口生效",
+    ),
+    o(
+        "macos-titlebar-proxy-icon",
+        "window",
+        "标题栏文件夹图标",
+        Kind::Enum(&[
+            ch("visible", "显示", "原生标题栏里，标题前显示当前目录的文件夹图标，可以拖动。"),
+            ch("hidden", "隐藏", "只显示标题文字。"),
+        ]),
+        Def::Text("visible"),
+        "只在原生标题栏样式下可见。",
+    ),
+    o(
+        "window-title-font-family",
+        "window",
+        "标题栏字体",
+        Kind::Text { placeholder: "系统字体" },
+        Def::Text(""),
+        "标题栏和标签页标题用的字体，留空用系统字体。",
     ),
     o(
         "window-padding-x",
@@ -514,6 +653,65 @@ pub const OPTS: &[Opt] = &[
         "只在背景不透明度低于 100% 时可见。",
     ),
     // — 分屏
+    o(
+        "window-width",
+        "window",
+        "新窗口列数",
+        num(0., 300., 10., fmt_cols, ser_plain, de_plain),
+        Def::Num(0.),
+        "新窗口的初始宽度，按字符列数计。0 表示由系统决定。和行数要同时设置才生效。",
+    ),
+    o(
+        "window-height",
+        "window",
+        "新窗口行数",
+        num(0., 100., 5., fmt_rows, ser_plain, de_plain),
+        Def::Num(0.),
+        "新窗口的初始高度，按行数计。",
+    ),
+    o(
+        "window-save-state",
+        "window",
+        "恢复窗口",
+        Kind::Enum(&[
+            ch("default", "跟随系统", "只在被强制退出、或系统设置要求时保存窗口。"),
+            ch("always", "始终", "每次退出都保存，下次打开恢复窗口、标签页和分屏。"),
+            ch("never", "从不", "每次都从一个新窗口开始。"),
+        ]),
+        Def::Text("default"),
+        NO,
+    ),
+    o(
+        "confirm-close-surface",
+        "window",
+        "关闭前确认",
+        Kind::Enum(&[
+            ch("true", "有程序运行时", "终端里有程序在运行时才确认；停在提示符时直接关闭（需要 shell 集成）。"),
+            ch("always", "始终", "每次关闭都确认。"),
+            ch("false", "从不", "直接关闭。"),
+        ]),
+        Def::Text("true"),
+        NO,
+    ),
+    o(
+        "window-colorspace",
+        "window",
+        "色彩空间",
+        Kind::Enum(&[
+            ch("srgb", "sRGB", "按 sRGB 解释配置里的颜色，和大多数主题的设计一致。"),
+            ch("display-p3", "Display P3", "按 P3 解释，同样的色值在广色域屏幕上更鲜艳。"),
+        ]),
+        Def::Text("srgb"),
+        NO,
+    ),
+    o(
+        "window-vsync",
+        "window",
+        "垂直同步",
+        Kind::Bool { on: NO, off: NO },
+        Def::Bool(true),
+        "与屏幕刷新同步绘制，避免画面撕裂。关闭能略降输入延迟，但在部分外接显示器上可能出问题。新终端生效。",
+    ),
     o(
         "unfocused-split-opacity",
         "split",
@@ -594,6 +792,23 @@ pub const OPTS: &[Opt] = &[
         "程序通过 Kitty 剪贴板协议（OSC 5522）单次写入的上限。超过上限的写入会失败，剪贴板保持原样；不影响 OSC 52。",
     )),
     o(
+        "clipboard-trim-trailing-spaces",
+        "clip",
+        "复制时去掉行尾空格",
+        Kind::Bool { on: NO, off: NO },
+        Def::Bool(true),
+        "复制到剪贴板时去掉每行末尾的空白。",
+    ),
+    o(
+        "selection-clear-on-typing",
+        "clip",
+        "打字时取消选中",
+        Kind::Bool { on: NO, off: NO },
+        Def::Bool(true),
+        "开始输入时取消当前选中。关闭后可以按 Esc 或单击取消。",
+    ),
+    o("selection-clear-on-copy", "clip", "复制后取消选中", Kind::Bool { on: NO, off: NO }, Def::Bool(false), NO),
+    o(
         "clipboard-paste-protection",
         "clip",
         "粘贴保护",
@@ -658,6 +873,64 @@ pub const OPTS: &[Opt] = &[
         "开始打字时隐藏指针，移动鼠标后重新出现。",
     ),
     // — 安全
+    o(
+        "shell-integration",
+        "shell",
+        "Shell 集成",
+        Kind::Enum(&[
+            ch("detect", "自动", "按 shell 的文件名识别并注入。"),
+            ch("zsh", "zsh", ""),
+            ch("bash", "bash", ""),
+            ch("fish", "fish", ""),
+            ch("none", "关闭", "不自动注入；需要的话自己在 shell 配置里加载。"),
+        ]),
+        Def::Text("detect"),
+        "让新标签继承目录、⌥ 点击移动光标、停在提示符时关窗不再确认。",
+    ),
+    o(
+        "shell-integration-features",
+        "shell",
+        "Shell 集成功能",
+        Kind::Flags(&[
+            ("cursor", "提示符处把光标换成竖线"),
+            ("sudo", "sudo 时保留 Ghostty 的 terminfo"),
+            ("title", "用当前命令和目录设置窗口标题"),
+            ("ssh-env", "SSH 时把 TERM 换成 xterm-256color 并传递相关环境变量"),
+            ("ssh-terminfo", "SSH 时在远端自动安装 Ghostty 的 terminfo"),
+            ("path", "把 ghostty 命令所在目录加入 PATH"),
+        ]),
+        Def::Text("cursor,no-sudo,title,no-ssh-env,no-ssh-terminfo,path"),
+        NO,
+    ),
+    o(
+        "term",
+        "shell",
+        "TERM",
+        Kind::Enum(&[
+            ch("xterm-ghostty", "xterm-ghostty", "Ghostty 自己的 terminfo，功能最全。"),
+            ch("xterm-256color", "xterm-256color", "兼容性最好；远端机器或 zellij、tmux 等程序不认识 xterm-ghostty 时用。"),
+        ]),
+        Def::Text("xterm-ghostty"),
+        NO,
+    ),
+    o(
+        "working-directory",
+        "shell",
+        "起始目录",
+        Kind::Text { placeholder: "home、inherit 或 ~/路径" },
+        Def::Text(""),
+        "新终端从哪个目录开始。home 是主目录，inherit 是启动 Ghostty 的进程所在目录；留空时从 Dock 或 open 打开用 home。",
+    ),
+    o(
+        "window-inherit-working-directory",
+        "shell",
+        "新窗口继承目录",
+        Kind::Bool { on: NO, off: NO },
+        Def::Bool(true),
+        "新窗口从上一个窗口的当前目录开始。",
+    ),
+    o("tab-inherit-working-directory", "shell", "新标签继承目录", Kind::Bool { on: NO, off: NO }, Def::Bool(true), NO),
+    o("split-inherit-working-directory", "shell", "新分屏继承目录", Kind::Bool { on: NO, off: NO }, Def::Bool(true), NO),
     new(o(
         "vt-window-resize-allowed",
         "sec",
@@ -712,6 +985,12 @@ pub fn cat_of_key(key: &str) -> Option<&'static str> {
         ("macos-option", "kbd"),
         ("mouse-", "kbd"),
         ("vt-", "sec"),
+        ("shell-", "shell"),
+        ("term", "shell"),
+        ("working-directory", "shell"),
+        ("window-inherit", "shell"),
+        ("tab-inherit", "shell"),
+        ("split-inherit", "shell"),
     ];
     PREFIXES.iter().find(|(p, _)| key.starts_with(p)).map(|(_, c)| *c)
 }
@@ -761,6 +1040,18 @@ mod tests {
         assert_eq!(bg.parse("122738"), Val::Color(Some(Rgb(0x122738))));
         assert_eq!(bg.ser(&Val::Color(Some(Rgb(0x122738)))), "#122738");
         assert_eq!(opt("cursor-color").unwrap().parse("cell-foreground"), Val::Raw("cell-foreground".into()));
+    }
+
+    #[test]
+    fn flags_and_text() {
+        let f = opt("shell-integration-features").unwrap();
+        assert_eq!(f.parse("cursor,title,sudo,path"), Val::Text("cursor,sudo,title,no-ssh-env,no-ssh-terminfo,path".into()));
+        assert_eq!(f.parse("no-cursor"), Val::Text("no-cursor,no-sudo,title,no-ssh-env,no-ssh-terminfo,path".into()));
+        assert_eq!(f.parse("false"), Val::Text("no-cursor,no-sudo,no-title,no-ssh-env,no-ssh-terminfo,no-path".into()));
+        assert!(f.is_default(&f.parse("cursor")));
+        assert_eq!(opt("working-directory").unwrap().parse("~/code"), Val::Text("~/code".into()));
+        assert_eq!(opt("adjust-cursor-height").unwrap().parse("80%"), Val::Num(80.));
+        assert_eq!(opt("adjust-cursor-thickness").unwrap().parse("10"), Val::Num(10.));
     }
 
     #[test]

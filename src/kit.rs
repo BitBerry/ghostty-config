@@ -110,3 +110,9 @@ pub fn radio_dot(checked: bool, p: &Pal) -> Div {
         d.border(px(1.5)).border_color(p.divider)
     }
 }
+
+/// A square check box: accent-filled with a tick when on.
+pub fn checkbox(checked: bool, p: &Pal) -> Div {
+    let d = div().size(px(16.)).flex_none().rounded(px(3.)).flex().items_center().justify_center().text_size(px(11.)).line_height(px(16.));
+    if checked { d.bg(p.accent).text_color(p.bg).child("✓") } else { d.border(px(1.5)).border_color(p.divider) }
+}

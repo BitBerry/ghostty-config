@@ -8,7 +8,7 @@ use gpui_kit::*;
 
 use crate::app::Editor;
 use crate::ghostty;
-use crate::kit::{Btn, SegItem, Tag, button, radio_dot, seg, tag};
+use crate::kit::{Btn, SegItem, Tag, button, checkbox, radio_dot, seg, tag};
 use crate::schema::{self, Kind, Num, OPTS, Opt, Val};
 use crate::theme::{MONO, Pal, PalExt as _, RADIUS_LG, RADIUS_MD, rgbc};
 
@@ -107,10 +107,18 @@ impl Editor {
             let to = if raw == "false" { "none" } else { "clipboard" };
             items.push(format!("copy-on-select = {raw} → {to}"));
         }
+        if self.legacy.contains("cursor-color") {
+            let on = self.lines.iter().rev().find(|l| l.key.as_deref() == Some("cursor-invert-fg-bg")).is_some_and(|l| l.value == "true");
+            items.push(if on {
+                "cursor-invert-fg-bg = true → cursor-color = cell-foreground + cursor-text = cell-background".to_string()
+            } else {
+                "cursor-invert-fg-bg = false → 删除".to_string()
+            });
+        }
         if items.is_empty() {
             return None;
         }
-        let mut list = div().flex_1().flex().flex_col().gap(px(4.)).child(
+        let mut list = div().flex_1().min_w_0().flex().flex_col().gap(px(4.)).child(
             div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(format!("你的配置里有 {} 处 1.4 已弃用的写法", items.len())),
         );
         for it in items {
@@ -219,6 +227,8 @@ impl Editor {
             Kind::Theme => self.render_themes(&v, width, p, cx).into_any_element(),
             Kind::Font => self.render_fonts(&v, p, cx).into_any_element(),
             Kind::Palette => self.render_palette(&v, p).into_any_element(),
+            Kind::Flags(flags) => self.render_flags(o, flags, &v, p, cx).into_any_element(),
+            Kind::Text { .. } => self.render_text(o, p).into_any_element(),
         };
         row.child(control).into_any_element()
     }
@@ -542,6 +552,49 @@ impl Editor {
             );
         }
         list
+    }
+
+    /// One check box per feature; the value is the full on/`no-` list.
+    fn render_flags(
+        &self,
+        o: &'static Opt,
+        flags: &'static [(&'static str, &'static str)],
+        v: &Val,
+        p: &Pal,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let key = o.key;
+        let on: Vec<bool> = flags.iter().map(|(n, _)| v.text().split(',').any(|t| t == *n)).collect();
+        let mut col = div().flex().flex_col().gap(px(8.)).mt(px(4.)).max_w(px(MEASURE));
+        for (i, (name, desc)) in flags.iter().enumerate() {
+            let next: String = flags
+                .iter()
+                .enumerate()
+                .map(|(j, (n, _))| if (j == i) != on[j] { n.to_string() } else { format!("no-{n}") })
+                .collect::<Vec<_>>()
+                .join(",");
+            col = col.child(
+                div()
+                    .id(SharedString::from(format!("flag-{key}-{i}")))
+                    .flex()
+                    .items_start()
+                    .gap(px(10.))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| this.set(key, Val::Text(next.clone()), cx)))
+                    .child(div().mt(px(2.)).child(checkbox(on[i], p)))
+                    .child(div().min_w(px(96.)).font_family(MONO).text_size(px(13.)).child(*name))
+                    .child(div().text_size(px(13.)).text_color(p.n(700)).child(*desc)),
+            );
+        }
+        col
+    }
+
+    fn render_text(&self, o: &'static Opt, p: &Pal) -> impl IntoElement {
+        let input = self.texts.get(o.key).cloned();
+        div()
+            .mt(px(4.))
+            .w(px(320.))
+            .when_some(input, |d, input| d.child(Input::new(&input).text_size(px(13.)).h(px(32.)).bg(p.bg).font_family(MONO)))
     }
 
     fn render_palette(&self, v: &Val, p: &Pal) -> impl IntoElement {

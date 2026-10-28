@@ -49,6 +49,9 @@ pub struct Loaded {
 fn aliases(key: &str) -> &'static [&'static str] {
     match key {
         "scrollback-limit-bytes" => &["scrollback-limit-bytes", "scrollback-limit"],
+        // Removed in 1.4: `true` is cursor-color = cell-foreground plus
+        // cursor-text = cell-background; `false` is the default.
+        "cursor-color" => &["cursor-color", "cursor-invert-fg-bg"],
         _ => &[],
     }
 }
@@ -105,19 +108,23 @@ pub fn read(lines: &[Line]) -> Loaded {
                     if l.key.as_deref() != Some(o.key) {
                         out.legacy.insert(o.key);
                     }
-                    match (o.key, l.value.as_str()) {
-                        // Deprecated aliases: on macOS `true` is `clipboard`.
-                        ("copy-on-select", "true") => {
-                            out.legacy.insert(o.key);
-                            Val::Text("clipboard".into())
-                        }
-                        ("copy-on-select", "false") => {
-                            out.legacy.insert(o.key);
-                            Val::Text("none".into())
-                        }
-                        ("background-blur", "0") => Val::Text("false".into()),
-                        ("background-blur", "20") => Val::Text("true".into()),
-                        _ => o.parse(&l.value),
+                    match (l.key.as_deref().unwrap_or(""), l.value.as_str()) {
+                        ("cursor-invert-fg-bg", "true") => Val::Raw("cell-foreground".into()),
+                        ("cursor-invert-fg-bg", _) => o.default(),
+                        _ => match (o.key, l.value.as_str()) {
+                            // Deprecated aliases: on macOS `true` is `clipboard`.
+                            ("copy-on-select", "true") => {
+                                out.legacy.insert(o.key);
+                                Val::Text("clipboard".into())
+                            }
+                            ("copy-on-select", "false") => {
+                                out.legacy.insert(o.key);
+                                Val::Text("none".into())
+                            }
+                            ("background-blur", "0") => Val::Text("false".into()),
+                            ("background-blur", "20") => Val::Text("true".into()),
+                            _ => o.parse(&l.value),
+                        },
                     }
                 }
             },
@@ -188,6 +195,16 @@ pub fn render(lines: &[Line], dirty: &[&'static Opt], values: &Values, fallbacks
                 }
             }
         }
+    }
+    // Migrating `cursor-invert-fg-bg = true`: its other half.
+    let inverted = lines.iter().any(|l| l.key.as_deref() == Some("cursor-invert-fg-bg") && l.value == "true");
+    if inverted
+        && dirty.iter().any(|o| o.key == "cursor-color")
+        && values.get("cursor-color") == Some(&Val::Raw("cell-foreground".into()))
+        && positions(&out, |k| k == "cursor-text").is_empty()
+        && let Some(o) = schema::opt("cursor-text")
+    {
+        insert(&mut out, o, "cursor-text = cell-background".into());
     }
     out
 }
@@ -347,6 +364,26 @@ mod tests {
         assert!(l.legacy.contains("scrollback-limit-bytes") && l.legacy.contains("copy-on-select"));
         assert_eq!(l.palette[&1], Rgb(0xff628c));
         assert_eq!(l.values["palette"], Val::Bool(true));
+    }
+
+    #[test]
+    fn migrates_cursor_invert() {
+        for (line, want) in
+            [("cursor-invert-fg-bg = false", None), ("cursor-invert-fg-bg = true", Some("cursor-color = cell-foreground\n"))]
+        {
+            let lines = parse(&format!("cursor-style = bar\n{line}\n"));
+            let loaded = read(&lines);
+            assert!(loaded.legacy.contains("cursor-color"));
+            let mut legacy = loaded.legacy.clone();
+            legacy.clear();
+            let d = dirty(&loaded, &loaded.values, &legacy);
+            let text = text_of(&render(&lines, &d, &loaded.values, &loaded.fallbacks));
+            assert!(!text.contains("cursor-invert-fg-bg"));
+            match want {
+                None => assert_eq!(text, "cursor-style = bar\n"),
+                Some(w) => assert!(text.contains(w) && text.contains("cursor-text = cell-background")),
+            }
+        }
     }
 
     #[test]

@@ -25,6 +25,12 @@ pub struct Look {
     pub theme_bg: Rgb,
     pub theme_fg: Rgb,
     pub theme_cursor: Rgb,
+    pub theme_cursor_text: Rgb,
+    pub theme_sel_bg: Rgb,
+    pub theme_sel_fg: Rgb,
+    pub cursor_text: Rgb,
+    pub sel_bg: Rgb,
+    pub sel_fg: Rgb,
     pub divider_default: Rgb,
 }
 
@@ -69,7 +75,28 @@ impl Editor {
         let fg = self.value("foreground").color().unwrap_or(th.fg);
         let theme_cursor = th.cursor.unwrap_or(fg);
         let cursor = self.value("cursor-color").color().unwrap_or(theme_cursor);
-        Look { bg, fg, cursor, palette, theme_bg: th.bg, theme_fg: th.fg, theme_cursor, divider_default: bg.mix(fg, 0.22) }
+        // Unset selection colors swap the window's background and foreground.
+        let (theme_sel_bg, theme_sel_fg, theme_cursor_text) =
+            (th.sel_bg.unwrap_or(fg), th.sel_fg.unwrap_or(bg), th.cursor_text.unwrap_or(bg));
+        let sel_bg = self.value("selection-background").color().unwrap_or(theme_sel_bg);
+        let sel_fg = self.value("selection-foreground").color().unwrap_or(theme_sel_fg);
+        let cursor_text = self.value("cursor-text").color().unwrap_or(theme_cursor_text);
+        Look {
+            bg,
+            fg,
+            cursor,
+            palette,
+            theme_bg: th.bg,
+            theme_fg: th.fg,
+            theme_cursor,
+            theme_cursor_text,
+            theme_sel_bg,
+            theme_sel_fg,
+            cursor_text,
+            sel_bg,
+            sel_fg,
+            divider_default: bg.mix(fg, 0.22),
+        }
     }
 
     pub fn palette_now(&mut self) -> Vec<Rgb> {
@@ -87,14 +114,10 @@ impl Editor {
             .then(|| format!("{family} 没有安装，Ghostty 会用内置的 JetBrains Mono 显示，预览也按它来画。"));
         let blur_hidden = self.value("background-blur").text() != "false" && self.num("background-opacity") >= 1.;
         let blur_note = blur_hidden.then(|| "背景模糊只在背景不透明度低于 100% 时可见，把「背景不透明度」调低就能看到。".to_string());
-        // Cursor tweaks the editor doesn't manage still show in the preview; say so.
-        let tweaks: Vec<String> = ["adjust-cursor-thickness", "adjust-cursor-height"]
-            .iter()
-            .filter_map(|k| self.raw_value(k).filter(|v| !v.is_empty() && v != "0").map(|v| format!("{k} = {v}")))
-            .collect();
-        let cursor_note = (self.cat == "cursor" && q.is_empty() && !tweaks.is_empty())
-            .then(|| format!("配置里还有 {}，预览已按它们画光标（这两项请直接在文件里改）。", tweaks.join("、")));
-        let note = fallback.or(blur_note).or(cursor_note).or_else(|| {
+        let cursor_note = (self.cat == "cursor" && q.is_empty() && self.shell_bar() && self.value("cursor-style").text() != "bar").then(|| {
+            "Shell 集成的 cursor 功能会在提示符处把光标换成竖线，所以这里看到的是竖线；vim 等程序里才是上面设置的形状。可在「Shell 与目录」里关掉。".to_string()
+        });
+        let note = cursor_note.or(fallback).or(blur_note).or_else(|| {
             (q.is_empty() && schema::cat(self.cat).is_some_and(|c| !c.visual))
                 .then(|| "这一类设置不改变外观，效果见左侧每项的说明。".to_string())
         });
@@ -161,9 +184,10 @@ impl Editor {
         }
     }
 
-    /// The last value of a key the editor doesn't manage.
-    fn raw_value(&self, key: &str) -> Option<String> {
-        self.lines.iter().rev().find(|l| l.key.as_deref() == Some(key)).map(|l| l.value.clone())
+    /// Shell integration's cursor feature: a bar at the prompt, whatever cursor-style says.
+    fn shell_bar(&self) -> bool {
+        self.value("shell-integration").text() != "none"
+            && self.value("shell-integration-features").text().split(',').any(|f| f == "cursor")
     }
 
     fn num(&self, key: &str) -> f32 {
@@ -184,7 +208,14 @@ impl Editor {
             _ => "transparent".into(),
         };
         // The tabs bar is taller: it holds the tab capsules.
-        let tb_h: f32 = if tbs == "tabs" { 36. } else { 30. };
+        let undecorated = self.value("window-decoration").text() == "none";
+        let tb_h: f32 = if undecorated || tbs == "hidden" {
+            0.
+        } else if tbs == "tabs" {
+            36.
+        } else {
+            30.
+        };
         let blur: Option<&'static str> = match self.value("background-blur") {
             Val::Text(s) if s == "true" => Some("true"),
             Val::Text(s) if s == "macos-glass-regular" => Some("macos-glass-regular"),
@@ -201,7 +232,7 @@ impl Editor {
         let lig = self.value("font-feature").flag() != Some(false);
         let thick = self.value("font-thicken").flag() == Some(true);
         let (padx, pady) = (self.num("window-padding-x"), self.num("window-padding-y"));
-        let cs = self.value("cursor-style").text().to_string();
+        let cs = if self.shell_bar() { "bar".to_string() } else { self.value("cursor-style").text().to_string() };
         let blinks = self.value("cursor-style-blink").text() != "false";
         let cc = rgba(look.cursor, self.num("cursor-opacity").clamp(0., 1.));
         let dh = self.value("drag-handle").text().to_string();
@@ -225,7 +256,12 @@ impl Editor {
         let blocks = |a: usize, b: usize| (a..b).map(|i| Seg { t: "   ".into(), c: fgc, b: Some(c(i)), bold: false }).collect::<Vec<_>>();
         let lines: Vec<Vec<Seg>> = vec![
             with(prompt(), vec![s("ls")]),
-            vec![s("Cargo.toml  README.md  "), seg("assets/  src/  target/", Some(4), true)],
+            vec![
+                s("Cargo.toml  "),
+                Seg { t: "README.md".into(), c: rgbc(look.sel_fg), b: Some(rgbc(look.sel_bg)), bold: false },
+                s("  "),
+                seg("assets/  src/  target/", Some(4), true),
+            ],
             with(prompt(), vec![s("git status -s")]),
             vec![seg(" M ", Some(3), false), s("src/app.rs")],
             vec![seg(" M ", Some(3), false), s("src/preview.rs")],
@@ -251,29 +287,70 @@ impl Editor {
             vec![seg("    Finished ", Some(2), true), s("dev in 4.21s")],
             vec![seg("     Running ", Some(2), true), s("ghostty-config")],
         ];
-        let last_prompt = prompt();
+        // `git pu` typed, `sh` suggested in a faint color; the cursor sits on the `s`.
+        let mut last_prompt = prompt();
+        last_prompt.push(s("git pu"));
+        let faint = rgba(fg, 0.4);
 
         // The cursor: one cell, shaped by cursor-style.
-        let cell_w = px((fs * if font.as_ref() == "Menlo" { 0.602 } else { 0.6 }).round());
+        let natural = (fs * if font.as_ref() == "Menlo" { 0.602 } else { 0.6 }).round();
+        // adjust-cell-width widens every cell; the glyphs keep their size.
+        let cell_w = px((natural * (1. + self.num("adjust-cell-width") / 100.)).round());
+        let spread = f32::from(cell_w) != natural;
         // As Ghostty sizes it: the font's height (not the cell's), the bar and
         // outline as thick as the underline, then adjust-cursor-* on top.
         let font_px = (fs * font_height(&font)).round();
         let base_thick = (fs * 0.05).round().max(1.);
-        let cur_h = adjust(font_px, self.raw_value("adjust-cursor-height").as_deref()).max(1.);
-        let thick_px = adjust(base_thick, self.raw_value("adjust-cursor-thickness").as_deref()).max(1.);
+        let adj = |key: &str| schema::opt(key).map(|o| o.ser(&self.value(key)));
+        let cur_h = adjust(font_px, adj("adjust-cursor-height").as_deref()).max(1.);
+        let thick_px = adjust(base_thick, adj("adjust-cursor-thickness").as_deref()).max(1.);
         let cur_top = (f32::from(line_h) - cur_h) / 2.;
         let shape = div().absolute().left_0().top(px(cur_top)).h(px(cur_h));
-        let cursor = div().relative().w(cell_w).h(line_h).flex_none().when(!blinks || self.blink_on, |d| match cs.as_str() {
-            "bar" => d.child(shape.w(px(thick_px)).bg(cc)),
-            "underline" => d.child(div().absolute().left_0().top(px(cur_top + cur_h - base_thick)).h(px(base_thick)).w(cell_w).bg(cc)),
-            "block_hollow" => d.child(shape.w(cell_w).border(px(thick_px)).border_color(cc)),
-            _ => d.child(shape.w(cell_w).bg(cc)),
-        });
+        let lit = !blinks || self.blink_on;
+        // The character under the cursor takes cursor-text inside a block.
+        let under = if cs == "block" && lit { rgbc(look.cursor_text) } else { faint };
+        let cursor = div()
+            .relative()
+            .w(cell_w)
+            .h(line_h)
+            .flex_none()
+            .when(lit, |d| match cs.as_str() {
+                "bar" => d.child(shape.w(px(thick_px)).bg(cc)),
+                "underline" => d.child(div().absolute().left_0().top(px(cur_top + cur_h - base_thick)).h(px(base_thick)).w(cell_w).bg(cc)),
+                "block_hollow" => d.child(shape.w(cell_w).border(px(thick_px)).border_color(cc)),
+                _ => d.child(shape.w(cell_w).bg(cc)),
+            })
+            .child(div().relative().w_full().flex().justify_center().text_color(under).child("s"));
 
+        // A line as one run of text, or cell by cell when cells are wider
+        // than the glyphs (GPUI has no letter spacing).
+        let line_el = move |l: &[Seg], backgrounds: bool| -> AnyElement {
+            if !spread {
+                return div().whitespace_nowrap().h(line_h).child(styled(l, backgrounds)).into_any_element();
+            }
+            let mut row = div().flex().h(line_h);
+            for sg in l {
+                for ch in sg.t.chars() {
+                    row = row.child(
+                        div()
+                            .w(cell_w)
+                            .h(line_h)
+                            .flex_none()
+                            .flex()
+                            .justify_center()
+                            .text_color(sg.c)
+                            .when(sg.bold, |d| d.font_weight(FontWeight::BOLD))
+                            .when_some(sg.b.filter(|_| backgrounds), |d, b| d.bg(b))
+                            .child(ch.to_string()),
+                    );
+                }
+            }
+            row.into_any_element()
+        };
         let text_block = |lines: &[Vec<Seg>], backgrounds: bool| {
             let mut col = div().flex().flex_col();
             for l in lines {
-                col = col.child(div().whitespace_nowrap().h(line_h).child(styled(l, backgrounds)));
+                col = col.child(line_el(l, backgrounds));
             }
             col
         };
@@ -281,7 +358,7 @@ impl Editor {
         // The grid, as Ghostty lays it out: whole rows and columns inside the
         // padding; what's left over goes where window-padding-balance says.
         let win_w = backdrop::W as f32 - 56.;
-        let pane_h = backdrop::H as f32 - 44. - if tbs == "hidden" { 0. } else { tb_h };
+        let pane_h = backdrop::H as f32 - 44. - tb_h;
         let pane_w = if self.split { (win_w - 1.) / 2. } else { win_w };
         let (lh_px, cw_px) = (f32::from(line_h), f32::from(cell_w));
         let rows = ((pane_h - 2. * pady) / lh_px).floor().max(1.);
@@ -338,10 +415,14 @@ impl Editor {
 
         // Only the last rows fit; the prompt line is always one of them.
         let shown = &lines[lines.len().saturating_sub(rows as usize - 1)..];
-        let mut body = div()
-            .relative()
-            .child(text_block(shown, true))
-            .child(div().flex().h(line_h).child(div().whitespace_nowrap().child(styled(&last_prompt, true))).child(cursor));
+        let mut body = div().relative().child(text_block(shown, true)).child(
+            div()
+                .flex()
+                .h(line_h)
+                .child(line_el(&last_prompt, true))
+                .child(cursor)
+                .child(line_el(&[Seg { t: "h".into(), c: faint, b: None, bold: false }], false)),
+        );
         if thick {
             body = body.child(thicken(shown));
         }
@@ -379,7 +460,7 @@ impl Editor {
         };
         // The native bar follows window-theme: system → the macOS appearance,
         // auto → the terminal background (or the system, with light/dark themes).
-        let chrome_dark = match self.raw_value("window-theme").as_deref().unwrap_or("auto") {
+        let chrome_dark = match self.value("window-theme").text() {
             "dark" => true,
             "light" => false,
             "system" => self.dark,
@@ -394,7 +475,12 @@ impl Editor {
             "tabs" => (pane_bg, rgba(fg, 0.55)),
             _ => (pane_bg, rgba(fg, 0.75)),
         };
-        let titlebar = (tbs != "hidden").then(|| {
+        let proxy = tbs == "native" && self.value("macos-titlebar-proxy-icon").text() == "visible";
+        let title_font: SharedString = match self.value("window-title-font-family").text() {
+            "" => SYSTEM_FONT.into(),
+            f => f.to_string().into(),
+        };
+        let titlebar = (tb_h > 0.).then(|| {
             let bar = div()
                 .h(px(tb_h))
                 .flex_none()
@@ -404,7 +490,7 @@ impl Editor {
                 .px(px(10.))
                 .bg(tb_bg)
                 .text_color(tb_fg)
-                .font_family(SYSTEM_FONT)
+                .font_family(title_font.clone())
                 .text_size(px(11.))
                 .child(dots());
             if tbs == "tabs" {
@@ -448,7 +534,25 @@ impl Editor {
                         ),
                 )
             } else {
-                bar.child(div().flex_1().flex().justify_center().pr(px(47.)).child("~/code/ghostty-config"))
+                // The proxy icon: a small folder before the title.
+                let folder = div()
+                    .relative()
+                    .w(px(13.))
+                    .h(px(10.))
+                    .rounded(px(2.))
+                    .bg(rgb(0x6aa9e9))
+                    .child(div().absolute().left_0().top(px(-2.)).w(px(6.)).h(px(3.)).rounded_t(px(1.)).bg(rgb(0x6aa9e9)));
+                bar.child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(5.))
+                        .pr(px(47.))
+                        .when(proxy, |d| d.child(folder))
+                        .child("~/code/ghostty-config"),
+                )
             }
         });
 
@@ -465,7 +569,7 @@ impl Editor {
             .bottom(px(22.))
             .left(px(28.))
             .right(px(28.))
-            .rounded(px(10.))
+            .when(!undecorated, |d| d.rounded(px(10.)))
             .overflow_hidden()
             .shadow(p.shadow_lg());
         if let Some(img_b) = blurred {

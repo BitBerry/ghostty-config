@@ -89,6 +89,9 @@ pub struct ThemeColors {
     pub bg: Rgb,
     pub fg: Rgb,
     pub cursor: Option<Rgb>,
+    pub cursor_text: Option<Rgb>,
+    pub sel_bg: Option<Rgb>,
+    pub sel_fg: Option<Rgb>,
     pub palette: [Rgb; 16],
 }
 
@@ -98,7 +101,7 @@ pub fn default_colors() -> ThemeColors {
         0x1d1f21, 0xcc6666, 0xb5bd68, 0xf0c674, 0x81a2be, 0xb294bb, 0x8abeb7, 0xc5c8c6, 0x666666, 0xd54e53, 0xb9ca4a, 0xe7c547, 0x7aa6da,
         0xc397d8, 0x70c0b1, 0xeaeaea,
     ];
-    ThemeColors { bg: Rgb(0x282c34), fg: Rgb(0xffffff), cursor: None, palette: P.map(Rgb) }
+    ThemeColors { bg: Rgb(0x282c34), fg: Rgb(0xffffff), cursor: None, cursor_text: None, sel_bg: None, sel_fg: None, palette: P.map(Rgb) }
 }
 
 fn user_themes() -> PathBuf {
@@ -140,6 +143,9 @@ pub fn load_theme(install: &Install, name: &str) -> Option<ThemeColors> {
             Some("background") => t.bg = Rgb::parse(&l.value).unwrap_or(t.bg),
             Some("foreground") => t.fg = Rgb::parse(&l.value).unwrap_or(t.fg),
             Some("cursor-color") => t.cursor = Rgb::parse(&l.value).or(t.cursor),
+            Some("cursor-text") => t.cursor_text = Rgb::parse(&l.value).or(t.cursor_text),
+            Some("selection-background") => t.sel_bg = Rgb::parse(&l.value).or(t.sel_bg),
+            Some("selection-foreground") => t.sel_fg = Rgb::parse(&l.value).or(t.sel_fg),
             Some("palette") => {
                 if let Some((i, c)) = l.value.split_once('=')
                     && let (Ok(i), Some(c)) = (i.trim().parse::<usize>(), Rgb::parse(c))
