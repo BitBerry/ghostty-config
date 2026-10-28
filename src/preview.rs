@@ -82,8 +82,13 @@ impl Editor {
     pub fn render_right(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = cx.pal().clone();
         let q = self.query(cx);
-        let note =
-            (q.is_empty() && schema::cat(self.cat).is_some_and(|c| !c.visual)).then_some("这一类设置不改变外观，效果见左侧每项的说明。");
+        let family = self.value("font-family").text().to_string();
+        let fallback = (self.effective_font() != family && !family.is_empty())
+            .then(|| format!("{family} 没有安装，Ghostty 会用内置的 JetBrains Mono 显示，预览也按它来画。"));
+        let note = fallback.or_else(|| {
+            (q.is_empty() && schema::cat(self.cat).is_some_and(|c| !c.visual))
+                .then(|| "这一类设置不改变外观，效果见左侧每项的说明。".to_string())
+        });
         let split = self.split;
         let modes = vec![
             SegItem {
@@ -134,6 +139,24 @@ impl Editor {
             .child(file)
     }
 
+    /// The family Ghostty will draw with: the configured one, or its
+    /// built-in JetBrains Mono when that isn't installed.
+    pub fn effective_font(&self) -> String {
+        let family = self.value("font-family").text().to_string();
+        if family.is_empty() || family == FONTS[0] {
+            return FONTS[0].into();
+        }
+        match &self.fonts {
+            Some(installed) if !installed.contains(&family) => FONTS[0].into(),
+            _ => family,
+        }
+    }
+
+    /// The last value of a key the editor doesn't manage.
+    fn raw_value(&self, key: &str) -> Option<String> {
+        self.lines.iter().rev().find(|l| l.key.as_deref() == Some(key)).map(|l| l.value.clone())
+    }
+
     fn num(&self, key: &str) -> f32 {
         let o = schema::opt(key);
         self.value(key).num().or_else(|| o.and_then(|o| o.default().num())).unwrap_or(0.) as f32
@@ -159,10 +182,11 @@ impl Editor {
             _ => None,
         };
         let fs = self.num("font-size").clamp(6., 40.);
-        let lh = 1.32 * (1. + self.num("adjust-cell-height") / 100.);
-        let line_h = px((fs * lh).max(fs * 0.8));
-        let family = self.value("font-family").text().to_string();
-        let font: SharedString = if family.is_empty() { FONTS[0].into() } else { family.into() };
+        let font: SharedString = self.effective_font().into();
+        // Ghostty's cell: the font's own ascent + descent + leading, whole
+        // pixels, then adjust-cell-height on top.
+        let cell = (fs * font_height(&font)).round();
+        let line_h = px((cell * (1. + self.num("adjust-cell-height") / 100.)).round().max(fs * 0.8));
         let lig = self.value("font-feature").flag() != Some(false);
         let thick = self.value("font-thicken").flag() == Some(true);
         let (padx, pady) = (self.num("window-padding-x"), self.num("window-padding-y"));
@@ -219,7 +243,7 @@ impl Editor {
         let last_prompt = prompt();
 
         // The cursor: one cell, shaped by cursor-style.
-        let cell_w = px(fs * 0.6);
+        let cell_w = px((fs * if font.as_ref() == "Menlo" { 0.602 } else { 0.6 }).round());
         let cursor = div().w(cell_w).h(line_h).flex_none().when(!blinks || self.blink_on, |d| match cs.as_str() {
             "bar" => d.child(div().w(px(2.)).h_full().bg(cc)),
             "underline" => d.flex().flex_col().justify_end().child(div().h(px(2.)).w_full().bg(cc)),
@@ -294,10 +318,19 @@ impl Editor {
                 .gap(px(7.))
                 .children([0xff5f57, 0xfebc2e, 0x28c840].map(|c| div().size(px(11.)).rounded_full().bg(rgb(c))))
         };
+        // The native bar follows window-theme: system → the macOS appearance,
+        // auto → the terminal background (or the system, with light/dark themes).
+        let chrome_dark = match self.raw_value("window-theme").as_deref().unwrap_or("auto") {
+            "dark" => true,
+            "light" => false,
+            "system" => self.dark,
+            _ if self.value("theme").text().contains(':') => self.dark,
+            _ => dark,
+        };
         let (tb_bg, tb_fg) = match tbs.as_str() {
             "native" => (
-                if dark { rgb(0x2e2c2c).into() } else { rgb(0xe4e2e1).into() },
-                if dark { rgb(0xd6d4d3).into() } else { rgb(0x3b3939).into() },
+                if chrome_dark { rgb(0x2e2c2c).into() } else { rgb(0xe8e6e6).into() },
+                if chrome_dark { rgb(0xd6d4d3).into() } else { rgb(0x4a4848).into() },
             ),
             "tabs" => (rgba(bg.mix(if dark { Rgb(0) } else { Rgb(0xffffff) }, 0.3), op), rgba(fg, 0.75)),
             _ => (pane_bg, rgba(fg, 0.75)),
@@ -465,5 +498,18 @@ impl Editor {
                     ),
             )
             .child(lines)
+    }
+}
+
+/// Line height in ems (ascent + descent + leading), measured with CoreText.
+fn font_height(family: &str) -> f32 {
+    match family {
+        "JetBrains Mono" => 1.32,
+        "Fira Code" => 1.312,
+        "IBM Plex Mono" => 1.30,
+        "Source Code Pro" => 1.257,
+        "Menlo" => 1.164,
+        "Monaco" => 1.333,
+        _ => 1.25,
     }
 }
