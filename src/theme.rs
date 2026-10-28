@@ -96,6 +96,8 @@ impl PalExt for App {
 pub const RADIUS_MD: f32 = 2.;
 pub const RADIUS_LG: f32 = 4.;
 pub const MONO: &str = "JetBrains Mono";
+/// The macOS system font, for window chrome in the preview.
+pub const SYSTEM_FONT: &str = ".SystemUIFont";
 
 pub fn apply(cx: &mut App) {
     let p = Pal::broadsheet();

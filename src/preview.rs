@@ -14,7 +14,7 @@ use crate::ghostty;
 use crate::kit::{SegItem, seg};
 use crate::rows::FONTS;
 use crate::schema::{self, Rgb, Val};
-use crate::theme::{MONO, Pal, PalExt as _, RADIUS_LG, RADIUS_MD, rgba, rgbc};
+use crate::theme::{MONO, Pal, PalExt as _, RADIUS_LG, RADIUS_MD, SYSTEM_FONT, rgba, rgbc};
 
 /// The colors in effect.
 pub struct Look {
@@ -183,6 +183,8 @@ impl Editor {
             Val::Text(s) => s,
             _ => "transparent".into(),
         };
+        // The tabs bar is taller: it holds the tab capsules.
+        let tb_h: f32 = if tbs == "tabs" { 36. } else { 30. };
         let blur: Option<&'static str> = match self.value("background-blur") {
             Val::Text(s) if s == "true" => Some("true"),
             Val::Text(s) if s == "macos-glass-regular" => Some("macos-glass-regular"),
@@ -279,7 +281,7 @@ impl Editor {
         // The grid, as Ghostty lays it out: whole rows and columns inside the
         // padding; what's left over goes where window-padding-balance says.
         let win_w = backdrop::W as f32 - 56.;
-        let pane_h = backdrop::H as f32 - 44. - if tbs == "hidden" { 0. } else { 30. };
+        let pane_h = backdrop::H as f32 - 44. - if tbs == "hidden" { 0. } else { tb_h };
         let pane_w = if self.split { (win_w - 1.) / 2. } else { win_w };
         let (lh_px, cw_px) = (f32::from(line_h), f32::from(cell_w));
         let rows = ((pane_h - 2. * pady) / lh_px).floor().max(1.);
@@ -389,12 +391,12 @@ impl Editor {
                 if chrome_dark { rgb(0x2e2c2c).into() } else { rgb(0xe8e6e6).into() },
                 if chrome_dark { rgb(0xd6d4d3).into() } else { rgb(0x4a4848).into() },
             ),
-            "tabs" => (rgba(bg.mix(if dark { Rgb(0) } else { Rgb(0xffffff) }, 0.3), op), rgba(fg, 0.75)),
+            "tabs" => (pane_bg, rgba(fg, 0.55)),
             _ => (pane_bg, rgba(fg, 0.75)),
         };
         let titlebar = (tbs != "hidden").then(|| {
             let bar = div()
-                .h(px(30.))
+                .h(px(tb_h))
                 .flex_none()
                 .flex()
                 .items_center()
@@ -402,19 +404,48 @@ impl Editor {
                 .px(px(10.))
                 .bg(tb_bg)
                 .text_color(tb_fg)
-                .font_family(MONO)
+                .font_family(SYSTEM_FONT)
                 .text_size(px(11.))
                 .child(dots());
             if tbs == "tabs" {
+                // macOS 26: the tabs are capsules in the bar, each with its ⌘n,
+                // and a round + at the end; the selected one a shade lighter.
+                let tab = |title: &'static str, key: &'static str, on: bool| {
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .h(px(24.))
+                        .relative()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .px(px(26.))
+                        .rounded_full()
+                        .bg(rgba(fg, if on { 0.12 } else { 0.05 }))
+                        .child(div().truncate().child(title))
+                        .child(div().absolute().right(px(10.)).top_0().bottom_0().flex().items_center().text_size(px(10.)).child(key))
+                };
                 bar.child(
                     div()
                         .flex_1()
-                        .h_full()
+                        .min_w_0()
                         .flex()
-                        .gap(px(2.))
-                        .pt(px(4.))
-                        .child(div().flex_1().flex().items_center().justify_center().rounded_t(px(6.)).bg(pane_bg).child("zsh"))
-                        .child(div().flex_1().flex().items_center().justify_center().opacity(0.7).child("cargo run")),
+                        .items_center()
+                        .gap(px(4.))
+                        .child(tab("~/code/ghostty-config", "⌘1", true))
+                        .child(tab("~/code", "⌘2", false))
+                        .child(
+                            div()
+                                .size(px(24.))
+                                .flex_none()
+                                .rounded_full()
+                                .bg(rgba(fg, 0.08))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_size(px(15.))
+                                .child("+"),
+                        ),
                 )
             } else {
                 bar.child(div().flex_1().flex().justify_center().pr(px(47.)).child("~/code/ghostty-config"))
