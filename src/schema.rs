@@ -949,6 +949,15 @@ pub const OPTS: &[Opt] = &[
     )),
 ];
 
+/// Choices with a known problem from some macOS version on:
+/// (key, value, macOS major, warning).
+pub const KNOWN_ISSUES: &[(&str, &str, u32, &str)] = &[(
+    "macos-titlebar-style",
+    "tabs",
+    27,
+    "在 macOS 27 上，Ghostty 1.4 的标签页标题栏有已知问题：关掉一个标签后，其余标签可能看不到（终端还在，可用 ⌘1–⌘9 切换）。新版 Ghostty 已修复，在那之前建议用「原生」或「透明」。",
+)];
+
 /// The 1.4 category: options that are new or changed meaning.
 pub fn is_news(o: &Opt) -> bool {
     o.new || o.changed || matches!(o.kind, Kind::Enum(chs) if chs.iter().any(|c| c.new))

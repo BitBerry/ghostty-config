@@ -242,6 +242,10 @@ impl Editor {
             _ => Vec::new(),
         };
         let desc = choices.iter().find(|c| c.0 == *v).map(|c| c.2).unwrap_or("");
+        let warn = schema::KNOWN_ISSUES
+            .iter()
+            .find(|(k, val, from, _)| *k == key && v.text() == *val && self.install.macos >= *from)
+            .map(|(.., w)| *w);
         let items = choices
             .iter()
             .map(|(val, label, _, new)| {
@@ -262,6 +266,7 @@ impl Editor {
             .mt(px(4.))
             .child(seg(key, items, false, p))
             .when(!desc.is_empty(), |d| d.child(div().max_w(px(MEASURE)).text_size(px(13.)).text_color(p.a(700)).child(desc)))
+            .when_some(warn, |d, w| d.child(div().max_w(px(MEASURE)).text_size(px(13.)).text_color(p.s(700)).child(w)))
     }
 
     fn render_slider(&self, o: &'static Opt, n: &'static Num, v: &Val, p: &Pal, cx: &mut Context<Self>) -> impl IntoElement {

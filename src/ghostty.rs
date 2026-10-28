@@ -15,6 +15,8 @@ pub const BUNDLE_ID: &str = "com.mitchellh.ghostty";
 pub struct Install {
     pub bin: Option<PathBuf>,
     pub version: Option<String>,
+    /// The macOS major version, e.g. 27.
+    pub macos: u32,
     /// `Contents/Resources/ghostty` of the app bundle: themes live here.
     pub resources: Option<PathBuf>,
 }
@@ -43,7 +45,13 @@ pub fn detect() -> Install {
         // "Ghostty 1.4.0"
         text.lines().next()?.strip_prefix("Ghostty ").map(|v| v.trim().to_string())
     });
-    Install { bin, version, resources }
+    let macos = Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().split('.').next()?.parse().ok())
+        .unwrap_or(0);
+    Install { bin, version, resources, macos }
 }
 
 fn which(name: &str) -> Option<PathBuf> {
