@@ -1,0 +1,41 @@
+[package]
+name = "ghostty-config"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A visual editor for Ghostty's config file, with a live terminal preview."
+repository = "https://github.com/BitBerry/ghostty-config"
+readme = "README.md"
+keywords = ["ghostty", "terminal", "config", "gpui"]
+categories = ["gui", "config"]
+
+[[bin]]
+name = "ghostty-config"
+path = "src/main.rs"
+
+[features]
+# Offscreen snapshots of each view for visual checks (enables GPUI test-support).
+snapshot = ["gpui-kit/test-support"]
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+gpui-kit = "0.8.0"
+image = { version = "0.25", default-features = false, features = ["png"] }
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSRunningApplication"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true
