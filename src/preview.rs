@@ -85,7 +85,16 @@ impl Editor {
         let family = self.value("font-family").text().to_string();
         let fallback = (self.effective_font() != family && !family.is_empty())
             .then(|| format!("{family} 没有安装，Ghostty 会用内置的 JetBrains Mono 显示，预览也按它来画。"));
-        let note = fallback.or_else(|| {
+        let blur_hidden = self.value("background-blur").text() != "false" && self.num("background-opacity") >= 1.;
+        let blur_note = blur_hidden.then(|| "背景模糊只在背景不透明度低于 100% 时可见，把「背景不透明度」调低就能看到。".to_string());
+        // Cursor tweaks the editor doesn't manage still show in the preview; say so.
+        let tweaks: Vec<String> = ["adjust-cursor-thickness", "adjust-cursor-height"]
+            .iter()
+            .filter_map(|k| self.raw_value(k).filter(|v| !v.is_empty() && v != "0").map(|v| format!("{k} = {v}")))
+            .collect();
+        let cursor_note = (self.cat == "cursor" && q.is_empty() && !tweaks.is_empty())
+            .then(|| format!("配置里还有 {}，预览已按它们画光标（这两项请直接在文件里改）。", tweaks.join("、")));
+        let note = fallback.or(blur_note).or(cursor_note).or_else(|| {
             (q.is_empty() && schema::cat(self.cat).is_some_and(|c| !c.visual))
                 .then(|| "这一类设置不改变外观，效果见左侧每项的说明。".to_string())
         });
@@ -244,11 +253,19 @@ impl Editor {
 
         // The cursor: one cell, shaped by cursor-style.
         let cell_w = px((fs * if font.as_ref() == "Menlo" { 0.602 } else { 0.6 }).round());
-        let cursor = div().w(cell_w).h(line_h).flex_none().when(!blinks || self.blink_on, |d| match cs.as_str() {
-            "bar" => d.child(div().w(px(2.)).h_full().bg(cc)),
-            "underline" => d.flex().flex_col().justify_end().child(div().h(px(2.)).w_full().bg(cc)),
-            "block_hollow" => d.border_1().border_color(cc),
-            _ => d.bg(cc),
+        // As Ghostty sizes it: the font's height (not the cell's), the bar and
+        // outline as thick as the underline, then adjust-cursor-* on top.
+        let font_px = (fs * font_height(&font)).round();
+        let base_thick = (fs * 0.05).round().max(1.);
+        let cur_h = adjust(font_px, self.raw_value("adjust-cursor-height").as_deref()).max(1.);
+        let thick_px = adjust(base_thick, self.raw_value("adjust-cursor-thickness").as_deref()).max(1.);
+        let cur_top = (f32::from(line_h) - cur_h) / 2.;
+        let shape = div().absolute().left_0().top(px(cur_top)).h(px(cur_h));
+        let cursor = div().relative().w(cell_w).h(line_h).flex_none().when(!blinks || self.blink_on, |d| match cs.as_str() {
+            "bar" => d.child(shape.w(px(thick_px)).bg(cc)),
+            "underline" => d.child(div().absolute().left_0().top(px(cur_top + cur_h - base_thick)).h(px(base_thick)).w(cell_w).bg(cc)),
+            "block_hollow" => d.child(shape.w(cell_w).border(px(thick_px)).border_color(cc)),
+            _ => d.child(shape.w(cell_w).bg(cc)),
         });
 
         let text_block = |lines: &[Vec<Seg>], backgrounds: bool| {
@@ -258,6 +275,35 @@ impl Editor {
             }
             col
         };
+
+        // The grid, as Ghostty lays it out: whole rows and columns inside the
+        // padding; what's left over goes where window-padding-balance says.
+        let win_w = backdrop::W as f32 - 56.;
+        let pane_h = backdrop::H as f32 - 44. - if tbs == "hidden" { 0. } else { 30. };
+        let pane_w = if self.split { (win_w - 1.) / 2. } else { win_w };
+        let (lh_px, cw_px) = (f32::from(line_h), f32::from(cell_w));
+        let rows = ((pane_h - 2. * pady) / lh_px).floor().max(1.);
+        let cols = ((pane_w - 2. * padx) / cw_px).floor().max(1.);
+        let (left_x, left_y) = ((pane_w - 2. * padx - cols * cw_px).max(0.), (pane_h - 2. * pady - rows * lh_px).max(0.));
+        let (off_x, off_y) = match self.value("window-padding-balance").text() {
+            "equal" => (left_x / 2., left_y / 2.),
+            // Balanced, but the top gets at most one cell; the rest goes below.
+            "true" => (left_x / 2., (left_y / 2.).min(lh_px)),
+            _ => (0., 0.),
+        };
+        let grid = |content: Div, bottom: bool| {
+            div()
+                .absolute()
+                .left(px(padx + off_x))
+                .top(px(pady + off_y))
+                .w(px(cols * cw_px))
+                .h(px(rows * lh_px))
+                .flex()
+                .flex_col()
+                // Output scrolls up: the prompt with the cursor stays on the last row.
+                .when(bottom, |d| d.justify_end())
+                .child(content)
+        };
         let pane = || {
             div()
                 .flex_1()
@@ -265,8 +311,6 @@ impl Editor {
                 .relative()
                 .overflow_hidden()
                 .bg(pane_bg)
-                .px(px(padx))
-                .py(px(pady))
                 .font_family(font.clone())
                 .text_size(px(fs))
                 .line_height(line_h)
@@ -290,25 +334,38 @@ impl Editor {
         // font-thicken: the text again, nudged right — GPUI has no text stroke.
         let thicken = |lines: &[Vec<Seg>]| div().absolute().top_0().left(px(0.45)).child(text_block(lines, false));
 
+        // Only the last rows fit; the prompt line is always one of them.
+        let shown = &lines[lines.len().saturating_sub(rows as usize - 1)..];
         let mut body = div()
             .relative()
-            .child(text_block(&lines, true))
+            .child(text_block(shown, true))
             .child(div().flex().h(line_h).child(div().whitespace_nowrap().child(styled(&last_prompt, true))).child(cursor));
         if thick {
-            body = body.child(thicken(&lines));
+            body = body.child(thicken(shown));
         }
-        if guide {
-            body = body.child(div().absolute().top_0().left_0().right_0().bottom_0().border_1().border_dashed().border_color(p.a(500)));
-        }
-        let mut panes = div().flex_1().min_h_0().flex().child(pane().child(body));
+        let guide_box = || {
+            div()
+                .absolute()
+                .left(px(padx + off_x))
+                .top(px(pady + off_y))
+                .w(px(cols * cw_px))
+                .h(px(rows * lh_px))
+                .border_1()
+                .border_dashed()
+                .border_color(p.a(500))
+        };
+        let mut panes = div().flex_1().min_h_0().flex().child(pane().child(grid(body, true)).when(guide, |d| d.child(guide_box())));
         if self.split {
             let mut body2 = div().relative().child(text_block(&lines2, true));
             if thick {
                 body2 = body2.child(thicken(&lines2));
             }
-            panes = panes
-                .child(div().w(px(1.)).flex_none().bg(rgbc(divider)))
-                .child(pane().child(body2).child(div().absolute().top_0().left_0().right_0().bottom_0().bg(rgbc(bg)).opacity(dim)));
+            panes = panes.child(div().w(px(1.)).flex_none().bg(rgbc(divider))).child(
+                pane()
+                    .child(grid(body2, false))
+                    .when(guide, |d| d.child(guide_box()))
+                    .child(div().absolute().top_0().left_0().right_0().bottom_0().bg(rgbc(bg)).opacity(dim)),
+            );
         }
 
         let dots = || {
@@ -511,5 +568,15 @@ fn font_height(family: &str) -> f32 {
         "Menlo" => 1.164,
         "Monaco" => 1.333,
         _ => 1.25,
+    }
+}
+
+/// A Ghostty metric adjustment: `2` adds pixels, `20%` scales.
+fn adjust(base: f32, raw: Option<&str>) -> f32 {
+    let Some(raw) = raw.map(str::trim).filter(|r| !r.is_empty()) else { return base };
+    if let Some(p) = raw.strip_suffix('%') {
+        p.trim().parse::<f32>().map(|p| base * (1. + p / 100.)).unwrap_or(base)
+    } else {
+        raw.parse::<f32>().map(|d| base + d).unwrap_or(base)
     }
 }

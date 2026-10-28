@@ -275,6 +275,10 @@ impl Editor {
     }
 
     pub fn set(&mut self, key: &'static str, v: Val, cx: &mut Context<Self>) {
+        // A split setting is only visible with two panes.
+        if schema::opt(key).is_some_and(|o| o.cat == "split") {
+            self.split = true;
+        }
         self.values.insert(key, v);
         self.legacy.remove(key);
         self.cfg_follow = Some(key);
